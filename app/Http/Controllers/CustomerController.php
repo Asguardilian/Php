@@ -3,21 +3,30 @@
 namespace App\Http\Controllers;
 
 use App\Models\Customer;
+use App\Services\CustomerService; // Importa o novo Service
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule; // Necessário para a regra unique no update
 
 class CustomerController extends Controller
 {
+    protected $customerService;
+
+    // 1. Injeção de Dependência no construtor
+    public function __construct(CustomerService $customerService)
+    {
+        $this->customerService = $customerService;
+    }
+
     /**
      * Exibe a lista de clientes com paginação.
      */
-    public function index()
+    public function index(Request $request)
     {
-        // CORREÇÃO DO ERRO: Usa paginate() para permitir o $customers->links() na View
-        $customers = Customer::paginate(10); 
+        // Delega a busca e paginação para o Service
+        $customers = $this->customerService->getPaginatedCustomers(10); 
         
-        // Passa uma variável 'i' para numeração sequencial (opcional)
         return view('customers.index', compact('customers'))
-               ->with('i', (request()->input('page', 1) - 1) * 10);
+               ->with('i', ($request->input('page', 1) - 1) * 10);
     }
 
     /**
@@ -25,71 +34,54 @@ class CustomerController extends Controller
      */
     public function create()
     {
-        // Assumindo que você usa 'create_update.blade.php'
         return view('customers.create_update');
     }
 
     /**
-     * Salva um novo cliente no banco de dados com validação.
+     * Valida e salva um novo cliente no banco de dados.
      */
     public function store(Request $request)
     {
-        // Adiciona validação de segurança e regras para os novos campos
-        $request->validate([
-            'nome' => 'required|string|max:150',
-            'email' => 'required|email|unique:customers',
-            'telefone' => 'nullable|string|max:20',
-            'cpf' => 'nullable|string|max:14|unique:customers',
-            'data_nascimento' => 'nullable|date',
-            'address' => 'nullable|string',
-        ]);
+        // Valida os dados (idealmente com StoreCustomerRequest)
+        $validatedData = $this->validateCustomerData($request);
         
-        Customer::create($request->all());
+        // Delega a criação para o Service
+        $this->customerService->createCustomer($validatedData);
         
-        // Adiciona mensagem de sucesso ao redirecionar
         return redirect()->route('customers.index')
                          ->with('success', 'Cliente cadastrado com sucesso!');
     }
 
     /**
-     * Mostra os detalhes de um cliente específico (não precisa de alteração)
+     * Mostra os detalhes de um cliente específico (usando Route Model Binding).
      */
-    public function show(string $id)
+    public function show(Customer $customer)
     {
-        return 'O id do usuário é: ' . $id;
+        // O Laravel já injeta o Customer, mas vamos garantir que ele está sendo usado
+        // return view('customers.show', compact('customer'));
+        return 'O id do usuário é: ' . $customer->id;
     }
 
     /**
      * Mostra o formulário para editar um cliente.
      */
-    public function edit($id)
+    public function edit(Customer $customer)
     {
-        $customer = Customer::findOrFail($id);
+        // O Route Model Binding já injetou $customer
         return view('customers.create_update', compact('customer'));
     }
 
     /**
-     * Atualiza um cliente existente no banco de dados com validação.
+     * Atualiza um cliente existente no banco de dados.
      */
-    public function update(Request $request, $id)
+    public function update(Request $request, Customer $customer)
     {
-        // Encontra o cliente
-        $customer = Customer::findOrFail($id);
-
-        // Regras de validação, ignorando o email e cpf do próprio cliente no check de unicidade
-        $request->validate([
-            'nome' => 'required|string|max:150',
-            'email' => 'required|email|unique:customers,email,' . $customer->id,
-            'telefone' => 'nullable|string|max:20',
-            'cpf' => 'nullable|string|max:14|unique:customers,cpf,' . $customer->id,
-            'data_nascimento' => 'nullable|date',
-            'address' => 'nullable|string',
-        ]);
+        // Valida os dados, ignorando o ID atual para unicidade
+        $validatedData = $this->validateCustomerData($request, $customer->id);
         
-        // Atualiza o registro
-        $customer->update($request->all());
+        // Delega a atualização para o Service
+        $this->customerService->updateCustomer($customer, $validatedData);
         
-        // Adiciona mensagem de sucesso ao redirecionar
         return redirect()->route('customers.index')
                          ->with('success', 'Cliente atualizado com sucesso!');
     }
@@ -97,11 +89,40 @@ class CustomerController extends Controller
     /**
      * Remove um cliente do banco de dados.
      */
-    public function destroy($id)
+    public function destroy(Customer $customer)
     {
-        Customer::find($id)->delete();
-        // Adiciona mensagem de sucesso ao redirecionar
+        // Delega a remoção para o Service
+        $this->customerService->deleteCustomer($customer->id);
+        
         return redirect()->route('customers.index')
                          ->with('success', 'Cliente excluído com sucesso!');
+    }
+
+    /**
+     * Método auxiliar para centralizar as regras de validação.
+     * @param Request $request Instância da requisição.
+     * @param int|null $ignoreId ID para ignorar na regra 'unique'.
+     * @return array Dados validados.
+     */
+    protected function validateCustomerData(Request $request, ?int $ignoreId = null): array
+    {
+        return $request->validate([
+            'nome' => 'required|string|max:150',
+            // Usa Rule::unique para lidar com o ignoreId de forma mais limpa
+            'email' => [
+                'required',
+                'email',
+                Rule::unique('customers', 'email')->ignore($ignoreId),
+            ],
+            'telefone' => 'nullable|string|max:20',
+            'cpf' => [
+                'nullable',
+                'string',
+                'max:14',
+                Rule::unique('customers', 'cpf')->ignore($ignoreId),
+            ],
+            'data_nascimento' => 'nullable|date',
+            'address' => 'nullable|string',
+        ]);
     }
 }

@@ -2,12 +2,29 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Product extends Model
 {
-    protected $table = 'product';
+    use HasFactory;
 
-    protected $fillable = ['name', 'description', 'price'];
-    
+    protected $fillable = [
+        'name',
+        'description',
+        'price',
+        'stock',
+        'category_id', // <--- NOVO CAMPO ADICIONADO AQUI
+    ];
+
+    /**
+     * Define a relação: um produto pertence a uma categoria.
+     * Isso permite usar $product->category->name na view.
+     */
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(Category::class);
+    }
 }
+
